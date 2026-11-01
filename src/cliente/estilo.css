@@ -25,7 +25,11 @@ th button { border:0; padding:0; background:none; font-weight:600; color:var(--t
 th[aria-sort=ascending] button::after { content:" ▲"; } th[aria-sort=descending] button::after { content:" ▼"; }
 td.num { text-align:right; font-variant-numeric:tabular-nums; }
 tr.urgente { background:var(--urgente); }
-td:nth-child(3) { max-width:320px; overflow:hidden; text-overflow:ellipsis; }
+/* Texto largo: se parte en varias líneas dentro de un ancho razonable en vez de recortarse. */
+td[data-col=detalle], td[data-col=motivo], td[data-col=recomendacion],
+th[data-col=detalle], th[data-col=motivo], th[data-col=recomendacion] { white-space:normal; overflow-wrap:break-word; }
+td[data-col=detalle] { min-width:170px; max-width:300px; }
+td[data-col=motivo], td[data-col=recomendacion] { min-width:220px; max-width:420px; line-height:1.35; }
 #paginacion { display:flex; gap:12px; align-items:center; justify-content:center; margin:14px 0; }
 @media (max-width:600px) { #filtros { grid-template-columns:1fr 1fr; } }
 
