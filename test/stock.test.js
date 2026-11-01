@@ -130,6 +130,8 @@ describe("rutas", () => {
     assert.match(html, /data-api="\/base\/stock\/api"/);
     assert.match(html, /data-cuenta="\/base\/cuenta\/"/);
     assert.match(html, /id="btn-col"/);
+    assert.match(html, /id="col-orden"/);
+    assert.match(html, /id="leyenda"/);
     assert.equal((html.match(/data-col="/g) ?? []).length, 24); // 23 columnas + la de evolución
     assert.equal((await pedir("/app.js")).status, 200);
     assert.equal((await pedir("/estilo.css")).status, 200);

@@ -63,7 +63,8 @@ async function cargar() {
       const td = document.createElement("td");
       td.dataset.col = c.campo;
       td.textContent = formato(fila[c.campo], c.tipo);
-      if (c.tipo === "numero") td.className = "num";
+      if (c.tipo === "numero") td.classList.add("num");
+      condicional(td, c.campo, fila);
       tr.append(td);
     }
     tr.append(celdaMini(fila, tr));
@@ -75,6 +76,7 @@ async function cargar() {
   $("#ant").disabled = cuerpo.pagina <= 1;
   $("#sig").disabled = cuerpo.pagina >= paginas;
   aviso(cuerpo.filas.length ? "" : "Ningún registro coincide con los filtros.");
+  aplicarOrden();
   aplicarOcultas();
   if (cuerpo.filas.length && !ocultas.has("spark")) pintarMinis(cuerpo.filas.map((f) => f.codigo), mio);
   for (const th of document.querySelectorAll("th[data-campo]")) {
@@ -108,6 +110,28 @@ for (const th of document.querySelectorAll("th[data-campo]")) {
     estado.pagina = 1;
     cargar();
   });
+}
+
+// ---------- formato condicional ----------
+// Agotado: stock <= 0 (misma regla que el notebook) → la casilla de stock en rojo claro.
+// Pedido sugerido: pedido central o prudente > 0 → la casilla en amarillo; cuanto mayor la efectividad (0 a 1, = 1 − error esperado),
+// más intenso. Sin efectividad calculada (sin ventas, no evaluable) queda el amarillo más pálido.
+const MIN_INTENSIDAD = 0.15;
+export const intensidad = (efectividad) =>
+  typeof efectividad === "number" && Number.isFinite(efectividad) ? MIN_INTENSIDAD + (1 - MIN_INTENSIDAD) * Math.min(1, Math.max(0, efectividad)) : 0.08;
+
+function condicional(td, campo, fila) {
+  if (campo === "total" && typeof fila.total === "number" && fila.total <= 0) {
+    td.classList.add("agotado");
+    td.title = "Agotado: sin stock";
+  } else if ((campo === "pedido_central" || campo === "pedido_prudente") && typeof fila[campo] === "number" && fila[campo] > 0) {
+    const k = intensidad(fila.efectividad);
+    td.classList.add("pide");
+    if (k >= 0.6) td.classList.add("alto"); // fondo fuerte: texto oscuro
+    td.style.setProperty("--int", String(k));
+    const ef = typeof fila.efectividad === "number" ? `efectividad ${Math.round(fila.efectividad * 100)} %` : "sin efectividad calculada";
+    td.title = `Pedido sugerido: ${num(fila[campo])} · ${ef}${fila.grado ? ` (grado ${fila.grado})` : ""}`;
+  }
 }
 
 // ---------- gráfico de línea por fila ----------
@@ -263,54 +287,139 @@ function dibujar(puntos) {
   return caja;
 }
 
-// ---------- panel de columnas ----------
+// ---------- panel de columnas: visibilidad y orden ----------
 const CLAVE = "stock:columnas-ocultas";
+const CLAVE_ORDEN = "stock:columnas-orden";
 const BASICAS = new Set(["fecha", "codigo", "detalle", "marca", "total", "urgente", "cobertura_dias", "spark"]);
 const FIJAS = new Set(["codigo"]); // sin el código no se sabe qué fila es cada una
-const leerOcultas = () => {
-  try { const v = JSON.parse(localStorage.getItem(CLAVE) ?? "[]"); return new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string" && !FIJAS.has(x)) : []); } catch { return new Set(); }
-};
-const ocultas = leerOcultas();
-const guardarOcultas = () => { try { localStorage.setItem(CLAVE, JSON.stringify([...ocultas])); } catch { /* sin almacenamiento: vale solo esta visita */ } };
+const ULTIMA = "spark"; // la columna de líneas queda fija en el borde derecho y no se mueve
+const BASE = [...document.querySelectorAll("thead th[data-col]")].map((t) => t.dataset.col).filter((c) => c !== ULTIMA);
+const TITULOS = Object.fromEntries([...document.querySelectorAll("thead th[data-col]")].map((t) => [t.dataset.col, t.textContent.trim()]));
+const guardar = (clave, valor) => { try { localStorage.setItem(clave, JSON.stringify(valor)); } catch { /* sin almacenamiento: vale solo esta visita */ } };
+const leerJson = (clave) => { try { const v = JSON.parse(localStorage.getItem(clave) ?? "null"); return Array.isArray(v) ? v.filter((x) => typeof x === "string") : null; } catch { return null; } };
+
+const ocultas = new Set((leerJson(CLAVE) ?? []).filter((x) => !FIJAS.has(x)));
+// Orden guardado, sin columnas que ya no existen y con las nuevas al final (por si se agrega una columna en el servidor).
+const guardado = (leerJson(CLAVE_ORDEN) ?? []).filter((c) => BASE.includes(c));
+let orden = [...new Set([...guardado, ...BASE])];
+const guardarOcultas = () => guardar(CLAVE, [...ocultas]);
+const guardarOrden = () => guardar(CLAVE_ORDEN, orden);
 
 function aplicarOcultas() {
   for (const el of document.querySelectorAll("table [data-col]")) el.hidden = ocultas.has(el.dataset.col);
   for (const caja of document.querySelectorAll("#lista-col input")) caja.checked = !ocultas.has(caja.value);
 }
 
-function armarPanel() {
+/** Reordena encabezado y celdas de cada fila según `orden`; la columna de líneas va siempre al final. */
+function aplicarOrden() {
+  const filas = document.querySelectorAll("table thead tr, table tbody tr:not(.grafico)");
+  for (const tr of filas) {
+    for (const c of [...orden, ULTIMA]) {
+      const el = tr.querySelector(`:scope > [data-col="${c}"]`);
+      if (el) tr.append(el);
+    }
+  }
+}
+
+function mover(col, haciaCol) {
+  if (col === haciaCol || !orden.includes(col) || !orden.includes(haciaCol)) return;
+  const sin = orden.filter((c) => c !== col);
+  sin.splice(orden.indexOf(haciaCol), 0, col); // la columna ocupa el lugar de la columna destino
+  orden = sin;
+  guardarOrden();
+  aplicarOrden();
+  pintarLista();
+}
+function desplazar(col, delta) {
+  const i = orden.indexOf(col), j = i + delta;
+  if (j < 0 || j >= orden.length) return;
+  mover(col, orden[j]);
+}
+
+function pintarLista(foco) {
   const lista = $("#lista-col");
-  for (const th of document.querySelectorAll("thead th[data-col]")) {
+  lista.replaceChildren();
+  for (const col of [...orden, ULTIMA]) {
+    const fijaPos = col === ULTIMA;
+    const item = document.createElement("div");
+    item.className = "item";
+    item.dataset.col = col;
+    if (!fijaPos) {
+      item.draggable = true;
+      item.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/plain", col); e.dataTransfer.effectAllowed = "move"; item.classList.add("arrastrando"); });
+      item.addEventListener("dragend", () => item.classList.remove("arrastrando"));
+      item.addEventListener("dragover", (e) => { e.preventDefault(); item.classList.add("sobre"); });
+      item.addEventListener("dragleave", () => item.classList.remove("sobre"));
+      item.addEventListener("drop", (e) => { e.preventDefault(); item.classList.remove("sobre"); mover(e.dataTransfer.getData("text/plain"), col); });
+    }
+    const asa = Object.assign(document.createElement("span"), { className: "asa", textContent: fijaPos ? "" : "⠿" });
+    asa.setAttribute("aria-hidden", "true");
     const l = document.createElement("label");
     const i = document.createElement("input");
     i.type = "checkbox";
-    i.value = th.dataset.col;
-    i.disabled = FIJAS.has(i.value);
+    i.value = col;
+    i.checked = !ocultas.has(col);
+    i.disabled = FIJAS.has(col);
     i.addEventListener("change", () => {
-      if (i.checked) ocultas.delete(i.value); else ocultas.add(i.value);
+      if (i.checked) ocultas.delete(col); else ocultas.add(col);
       guardarOcultas();
       aplicarOcultas();
-      if (i.value === "spark" && i.checked) pintarMinis([...document.querySelectorAll("td.spark")].map((t) => t.dataset.codigo), pedido);
+      if (col === ULTIMA && i.checked) pintarMinis([...document.querySelectorAll("td.spark")].map((t) => t.dataset.codigo), pedido);
     });
-    l.append(i, document.createTextNode(` ${th.textContent.trim()}`));
-    lista.append(l);
+    l.append(i, document.createTextNode(` ${TITULOS[col]}`));
+    item.append(asa, l);
+    if (!fijaPos) {
+      const sube = Object.assign(document.createElement("button"), { type: "button", className: "sube", textContent: "▲" });
+      const baja = Object.assign(document.createElement("button"), { type: "button", className: "baja", textContent: "▼" });
+      sube.setAttribute("aria-label", `Subir ${TITULOS[col]}`);
+      baja.setAttribute("aria-label", `Bajar ${TITULOS[col]}`);
+      sube.disabled = orden[0] === col;
+      baja.disabled = orden.at(-1) === col;
+      sube.addEventListener("click", () => { desplazar(col, -1); $(`#lista-col .item[data-col="${col}"] .${sube.disabled ? "baja" : "sube"}`)?.focus(); });
+      baja.addEventListener("click", () => { desplazar(col, 1); $(`#lista-col .item[data-col="${col}"] .${baja.disabled ? "sube" : "baja"}`)?.focus(); });
+      item.append(sube, baja);
+    }
+    lista.append(item);
   }
-  const todas = [...document.querySelectorAll("thead th[data-col]")].map((t) => t.dataset.col);
-  $("#col-todas").addEventListener("click", () => { ocultas.clear(); guardarOcultas(); aplicarOcultas(); pintarMinis([...document.querySelectorAll("td.spark")].map((t) => t.dataset.codigo), pedido); });
+  aplicarOcultas();
+}
+
+/** Los encabezados también se arrastran: se suelta una columna sobre otra para cambiarla de lugar. */
+function armarEncabezados() {
+  for (const th of document.querySelectorAll("thead th[data-col]")) {
+    const col = th.dataset.col;
+    if (col === ULTIMA) continue;
+    th.draggable = true;
+    th.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/plain", col); e.dataTransfer.effectAllowed = "move"; });
+    th.addEventListener("dragover", (e) => { e.preventDefault(); th.classList.add("sobre"); });
+    th.addEventListener("dragleave", () => th.classList.remove("sobre"));
+    th.addEventListener("drop", (e) => { e.preventDefault(); th.classList.remove("sobre"); mover(e.dataTransfer.getData("text/plain"), col); });
+  }
+}
+
+function armarPanel() {
+  pintarLista();
+  armarEncabezados();
+  const minis = () => pintarMinis([...document.querySelectorAll("td.spark")].map((t) => t.dataset.codigo), pedido);
+  $("#col-todas").addEventListener("click", () => { ocultas.clear(); guardarOcultas(); aplicarOcultas(); minis(); });
   $("#col-basicas").addEventListener("click", () => {
     ocultas.clear();
-    for (const c of todas) if (!BASICAS.has(c) && !FIJAS.has(c)) ocultas.add(c);
+    for (const c of [...BASE, ULTIMA]) if (!BASICAS.has(c) && !FIJAS.has(c)) ocultas.add(c);
     guardarOcultas();
     aplicarOcultas();
   });
+  $("#col-orden").addEventListener("click", () => { orden = [...BASE]; guardarOrden(); aplicarOrden(); pintarLista(); });
   const btn = $("#btn-col"), panel = $("#panel-col");
   const abrir = (v) => { panel.hidden = !v; btn.setAttribute("aria-expanded", String(v)); };
   btn.addEventListener("click", () => abrir(panel.hidden));
-  document.addEventListener("click", (e) => { if (!panel.hidden && !e.target.closest(".columnas")) abrir(false); });
+  // composedPath se calcula al despachar el clic: sigue valiendo aunque la lista se haya redibujado y el botón ya no esté en el DOM.
+  const caja = btn.closest(".columnas");
+  document.addEventListener("click", (e) => { if (!panel.hidden && !e.composedPath().includes(caja)) abrir(false); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) { abrir(false); btn.focus(); } });
 }
 
 armarPanel();
+aplicarOrden();
 aplicarOcultas();
 cargarListas();
 cargar();

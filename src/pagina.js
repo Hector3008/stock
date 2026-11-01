@@ -24,8 +24,9 @@ export function paginaStock({ base, login }) {
   <div class="columnas">
     <button type="button" id="btn-col" aria-expanded="false" aria-controls="panel-col">Columnas ▾</button>
     <div id="panel-col" role="group" aria-label="Columnas visibles" hidden>
+      <p class="ayuda">Marca para mostrar u ocultar. Arrastra una fila (o una columna de la tabla) o usa ▲ ▼ para cambiar el orden.</p>
       <div id="lista-col"></div>
-      <div class="acciones"><button type="button" id="col-todas">Mostrar todas</button><button type="button" id="col-basicas">Solo básicas</button></div>
+      <div class="acciones"><button type="button" id="col-todas">Mostrar todas</button><button type="button" id="col-basicas">Solo básicas</button><button type="button" id="col-orden">Orden original</button></div>
     </div>
   </div>
 </header>
@@ -41,6 +42,7 @@ export function paginaStock({ base, login }) {
   <div class="acciones"><button type="submit">Filtrar</button><button type="reset" id="limpiar">Limpiar</button></div>
 </form>
 <div id="aviso" role="status"></div>
+<p id="leyenda"><span class="muestra agotado"></span> Agotado (stock 0) <span class="sep"></span> <span class="muestra pedido"></span> Pedido sugerido: más intenso = mayor efectividad <span class="rampa"></span></p>
 <div class="tabla"><table><thead><tr>${cabecera}<th scope="col" class="spark" data-col="spark">Evolución del stock</th></tr></thead><tbody id="filas"></tbody></table></div>
 <nav id="paginacion" aria-label="Paginación"><button type="button" id="ant">‹ Anterior</button><span id="pos"></span><button type="button" id="sig">Siguiente ›</button></nav>
 </main>
