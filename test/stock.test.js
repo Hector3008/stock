@@ -4,42 +4,44 @@ import assert from "node:assert/strict";
 import express from "express";
 import { leerConsulta, leerSerie, leerSeries, limpiarSerie, normalizar, limpiarFila, ErrorConsulta } from "../src/consulta.js";
 import { createRouter, PERMISO } from "../src/index.js";
+import { COLUMNAS, CORTO, INTERNOS } from "../src/columnas.js";
+import { readFileSync } from "node:fs";
 
 describe("leerConsulta", () => {
   test("valores por defecto", () => {
     const q = leerConsulta({});
     assert.deepEqual(q.filtro, {});
-    assert.deepEqual(q.orden, { fecha: -1, codigo: 1 });
+    assert.deepEqual(q.orden, { f: -1, c: 1 });
     assert.equal(q.pagina, 1);
     assert.equal(q.tamano, 10);
   });
   test("texto: sin tildes, en minúsculas y con los símbolos de regex escapados", () => {
     assert.equal(normalizar("  Válvula   DE  Bola "), "valvula de bola");
     const q = leerConsulta({ codigo: "ZM.*(", detalle: "Válvula bola" });
-    assert.deepEqual(q.filtro.$and[0], { codigo_n: { $regex: "zm\\.\\*\\(" } });
-    assert.deepEqual(q.filtro.$and.slice(1), [{ detalle_n: { $regex: "valvula" } }, { detalle_n: { $regex: "bola" } }]);
+    assert.deepEqual(q.filtro.$and[0], { cn: { $regex: "zm\\.\\*\\(" } });
+    assert.deepEqual(q.filtro.$and.slice(1), [{ dn: { $regex: "valvula" } }, { dn: { $regex: "bola" } }]);
   });
   test("fechas: rango inclusivo, formato y orden", () => {
     const q = leerConsulta({ desde: "2026-01-05", hasta: "2026-02-01" });
-    assert.equal(q.filtro.fecha.$gte.toISOString(), "2026-01-05T00:00:00.000Z");
-    assert.equal(q.filtro.fecha.$lte.toISOString(), "2026-02-01T00:00:00.000Z");
+    assert.equal(q.filtro.f.$gte.toISOString(), "2026-01-05T00:00:00.000Z");
+    assert.equal(q.filtro.f.$lte.toISOString(), "2026-02-01T00:00:00.000Z");
     assert.throws(() => leerConsulta({ desde: "05/01/2026" }), ErrorConsulta);
     assert.throws(() => leerConsulta({ desde: "2026-02-30" }), ErrorConsulta);
     assert.throws(() => leerConsulta({ desde: "2026-03-01", hasta: "2026-02-01" }), ErrorConsulta);
   });
   test("listas: uno o varios valores, también con |; urgente si/no", () => {
     const q = leerConsulta({ grado: ["A", "B"], segmento: "X|Y", urgente: "si" });
-    assert.deepEqual(q.filtro.grado, { $in: ["A", "B"] });
-    assert.deepEqual(q.filtro.segmento, { $in: ["X", "Y"] });
-    assert.equal(q.filtro.urgente, true);
-    assert.equal(leerConsulta({ urgente: "no" }).filtro.urgente, false);
-    assert.equal("urgente" in leerConsulta({ urgente: "" }).filtro, false);
+    assert.deepEqual(q.filtro.gr, { $in: ["A", "B"] });
+    assert.deepEqual(q.filtro.sg, { $in: ["X", "Y"] });
+    assert.equal(q.filtro.ur, true);
+    assert.equal(leerConsulta({ urgente: "no" }).filtro.ur, false);
+    assert.equal("ur" in leerConsulta({ urgente: "" }).filtro, false);
     assert.throws(() => leerConsulta({ urgente: "tal vez" }), ErrorConsulta);
   });
   test("un operador de MongoDB en el query string no pasa", () => {
     // ?grado[$ne]=x llega como objeto: se convierte a texto y queda como valor literal, nunca como operador
     const q = leerConsulta({ grado: { $ne: "x" } });
-    assert.deepEqual(q.filtro.grado, { $in: ["[object Object]"] });
+    assert.deepEqual(q.filtro.gr, { $in: ["[object Object]"] });
     assert.throws(() => leerConsulta({ orden: "$where" }), ErrorConsulta);
   });
   test("paginación: solo 10 o 20, página entera positiva", () => {
@@ -49,13 +51,13 @@ describe("leerConsulta", () => {
     assert.throws(() => leerConsulta({ pagina: "1.5" }), ErrorConsulta);
   });
   test("orden con desempate estable", () => {
-    assert.deepEqual(leerConsulta({ orden: "cobertura_dias", dir: "asc" }).orden, { cobertura_dias: 1, codigo: 1, fecha: -1 });
-    assert.deepEqual(leerConsulta({ orden: "codigo", dir: "desc" }).orden, { codigo: -1, fecha: -1 });
+    assert.deepEqual(leerConsulta({ orden: "cobertura_dias", dir: "asc" }).orden, { cd: 1, c: 1, f: -1 });
+    assert.deepEqual(leerConsulta({ orden: "codigo", dir: "desc" }).orden, { c: -1, f: -1 });
   });
 });
 
 test("limpiarFila: fechas en texto, NaN y ausentes como null, sin columnas ajenas", () => {
-  const f = limpiarFila({ _id: 1, secreto: "x", codigo: "ZM1", fecha: new Date("2026-01-05T00:00:00Z"), total: NaN, grado: "A" });
+  const f = limpiarFila({ _id: 1, secreto: "x", c: "ZM1", f: new Date("2026-01-05T00:00:00Z"), t: NaN, gr: "A" });
   assert.equal(f.fecha, "2026-01-05");
   assert.equal(f.total, null);
   assert.equal(f.modelo, null);
@@ -82,8 +84,8 @@ describe("serie", () => {
     assert.equal(typeof leerSerie({ codigo: { $ne: "x" } }).codigo, "string");
   });
   test("limpiarSerie: fechas en texto y sin puntos vacíos", () => {
-    const d = (s, total) => ({ fecha: new Date(`${s}T00:00:00Z`), total });
-    assert.deepEqual(limpiarSerie([d("2026-01-05", 3), d("2026-01-06", NaN), d("2026-01-07", null), { fecha: null, total: 1 }, d("2026-01-08", 0)], "total"), [
+    const d = (s, total) => ({ f: new Date(`${s}T00:00:00Z`), t: total });
+    assert.deepEqual(limpiarSerie([d("2026-01-05", 3), d("2026-01-06", NaN), d("2026-01-07", null), { f: null, t: 1 }, d("2026-01-08", 0)], "total"), [
       { fecha: "2026-01-05", valor: 3 },
       { fecha: "2026-01-08", valor: 0 },
     ]);
@@ -91,7 +93,7 @@ describe("serie", () => {
 });
 
 function coleccionFalsa() {
-  const c = { llamadas: [], docs: [{ codigo: "ZM1", detalle: "Café", fecha: new Date("2026-01-05T00:00:00Z"), grado: "A", segmento: "X", urgente: true }] };
+  const c = { llamadas: [], docs: [{ c: "ZM1", d: "Café", f: new Date("2026-01-05T00:00:00Z"), gr: "A", sg: "X", ur: true, t: 7, eq: "ZM2 (3)", pc: 12 }] };
   c.find = (filtro, opc) => {
     const cur = { sort: (o) => ((c.orden = o), cur), skip: (n) => ((c.skip = n), cur), limit: (n) => ((c.limit = n), cur), toArray: async () => c.docs };
     c.llamadas.push(["find", filtro, opc.projection]);
@@ -132,7 +134,7 @@ describe("rutas", () => {
     assert.match(html, /id="btn-col"/);
     assert.match(html, /id="col-orden"/);
     assert.match(html, /id="leyenda"/);
-    assert.equal((html.match(/data-col="/g) ?? []).length, 24); // 23 columnas + la de evolución
+    assert.equal((html.match(/data-col="/g) ?? []).length, COLUMNAS.length + 1); // todas las columnas + la de evolución
     assert.equal((await pedir("/app.js")).status, 200);
     assert.equal((await pedir("/estilo.css")).status, 200);
   });
@@ -156,7 +158,7 @@ describe("rutas", () => {
     assert.equal(j.filas[0].fecha, "2026-01-05");
     assert.equal(col.skip, 40);
     assert.equal(col.limit, 20);
-    assert.deepEqual(col.llamadas.find((l) => l[0] === "count")[1], { grado: { $in: ["A"] }, urgente: true });
+    assert.deepEqual(col.llamadas.find((l) => l[0] === "count")[1], { gr: { $in: ["A"] }, ur: true });
     assert.equal(col.llamadas.find((l) => l[0] === "find")[2]._id, 0);
   });
   test("sin filtros usa el conteo estimado", async () => {
@@ -170,11 +172,11 @@ describe("rutas", () => {
     col.llamadas.length = 0;
     const j = await (await pedir("/api/serie?codigo=ZM1&campo=total")).json();
     assert.equal(j.codigo, "ZM1");
-    assert.deepEqual(j.puntos, []); // el doc falso no trae total
+    assert.deepEqual(j.puntos, [{ fecha: "2026-01-05", valor: 7 }]);
     const f = col.llamadas.find((l) => l[0] === "find");
-    assert.deepEqual(f[1], { codigo: "ZM1" });
-    assert.deepEqual(f[2], { _id: 0, fecha: 1, total: 1 });
-    assert.deepEqual(col.orden, { fecha: 1 });
+    assert.deepEqual(f[1], { c: "ZM1" });
+    assert.deepEqual(f[2], { _id: 0, f: 1, t: 1 });
+    assert.deepEqual(col.orden, { f: 1 });
     assert.equal((await pedir("/api/serie")).status, 400);
     assert.equal((await pedir("/api/serie?codigo=ZM1&campo=x")).status, 400);
     sesion = null;
@@ -187,8 +189,8 @@ describe("rutas", () => {
     const j = await (await pedir("/api/series?codigos=ZM1|ZM2")).json();
     assert.deepEqual(Object.keys(j.porCodigo), ["ZM1", "ZM2"]);
     assert.equal(col.llamadas.filter((l) => l[0] === "find").length, 1);
-    assert.deepEqual(col.llamadas.find((l) => l[0] === "find")[1], { codigo: { $in: ["ZM1", "ZM2"] } });
-    assert.deepEqual(col.orden, { codigo: 1, fecha: 1 });
+    assert.deepEqual(col.llamadas.find((l) => l[0] === "find")[1], { c: { $in: ["ZM1", "ZM2"] } });
+    assert.deepEqual(col.orden, { c: 1, f: 1 });
     assert.equal((await pedir("/api/series")).status, 400);
     sesion = null;
     assert.equal((await pedir("/api/series?codigos=ZM1")).status, 401);
@@ -217,6 +219,50 @@ test("sin STOCK_EMPRESA_ID queda desactivado (503) y lo avisa", async () => {
     const r = await fetch(`http://127.0.0.1:${s.address().port}/stock/api/datos`);
     assert.equal(r.status, 503);
     assert.match(avisos[0], /STOCK_EMPRESA_ID/);
+  } finally {
+    s.close();
+  }
+});
+
+describe("catálogo de columnas", () => {
+  test("sin repetidos: ni nombres ni claves cortas", () => {
+    const campos = COLUMNAS.map((c) => c.campo), cortos = [...COLUMNAS.map((c) => c.corto), ...Object.values(INTERNOS)];
+    assert.equal(new Set(campos).size, campos.length);
+    assert.equal(new Set(cortos).size, cortos.length);
+    assert.ok(cortos.every((k) => /^[a-z0-9]{1,2}$/.test(k)));
+  });
+  test("las columnas nuevas empiezan ocultas; las de siempre, no", () => {
+    assert.equal(COLUMNAS.slice(0, 23).filter((c) => c.oculta).length, 0);
+    assert.ok(COLUMNAS.slice(23).every((c) => c.oculta));
+    assert.deepEqual([...new Set(COLUMNAS.map((c) => c.grupo))], ["base", "equivalentes", "stock", "calculo"]);
+  });
+  test("la celda de Colab crea los mismos índices que el router", () => {
+    const py = readFileSync(new URL("../herramientas/colab-cargar-stock.py", import.meta.url), "utf8");
+    assert.match(py, /create_index\(\[\("c", 1\), \("f", 1\)\], unique=True\)/);
+    assert.match(py, /create_index\(\[\("f", -1\), \("c", 1\)\]\)/);
+    for (const c of ["segmento", "rotacion", "estado", "grado", "marca", "urgente"]) assert.ok(py.includes(`"${CORTO[c]}"`), c);
+  });
+  test("la celda de Colab usa exactamente las mismas claves cortas", () => {
+    const py = readFileSync(new URL("../herramientas/colab-cargar-stock.py", import.meta.url), "utf8");
+    const bloque = py.slice(py.indexOf("CLAVES = {"), py.indexOf("}", py.indexOf("CLAVES = {")));
+    const enPy = Object.fromEntries([...bloque.matchAll(/"([^"]+)":\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]));
+    assert.deepEqual(enPy, CORTO);
+  });
+});
+
+test("la API devuelve nombres largos aunque Mongo guarde claves cortas", async () => {
+  const col = coleccionFalsa();
+  const core = { autenticar: () => (q, r, n) => ((q.auth = { empresaId: "e1" }), n()), requierePermiso: () => (q, r, n) => n() };
+  const app = express();
+  app.use("/stock", createRouter({ core, db: { collection: () => col }, env: { STOCK_EMPRESA_ID: "e1" }, avisar: () => {} }));
+  const s = app.listen(0);
+  try {
+    const j = await (await fetch(`http://127.0.0.1:${s.address().port}/stock/api/datos`)).json();
+    assert.equal(j.filas[0].equivalente_stock, "ZM2 (3)");
+    assert.equal(j.filas[0].pedido_central, 12);
+    assert.equal(j.filas[0].codigo, "ZM1");
+    assert.equal(j.filas[0].stock_lv, null); // columna que el documento no trae
+    assert.equal(col.llamadas.find((l) => l[0] === "find")[2].eq, 1); // y se pide con su clave corta
   } finally {
     s.close();
   }

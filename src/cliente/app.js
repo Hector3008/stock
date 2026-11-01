@@ -298,11 +298,21 @@ const TITULOS = Object.fromEntries([...document.querySelectorAll("thead th[data-
 const guardar = (clave, valor) => { try { localStorage.setItem(clave, JSON.stringify(valor)); } catch { /* sin almacenamiento: vale solo esta visita */ } };
 const leerJson = (clave) => { try { const v = JSON.parse(localStorage.getItem(clave) ?? "null"); return Array.isArray(v) ? v.filter((x) => typeof x === "string") : null; } catch { return null; } };
 
+const CLAVE_MOSTRADAS = "stock:columnas-mostradas";
+// Las columnas nuevas (data-oculta) empiezan ocultas, salvo que esa persona ya las haya mostrado alguna vez.
+const OCULTAS_DE_FABRICA = new Set([...document.querySelectorAll("thead th[data-oculta]")].map((t) => t.dataset.col));
+const GRUPOS = { equivalentes: "equivalentes", stock: "stock y mov.", calculo: "cálculo" };
+const GRUPO_DE = Object.fromEntries([...document.querySelectorAll("thead th[data-col]")].map((t) => [t.dataset.col, t.dataset.grupo]));
+const mostradas = new Set(leerJson(CLAVE_MOSTRADAS) ?? []);
 const ocultas = new Set((leerJson(CLAVE) ?? []).filter((x) => !FIJAS.has(x)));
+for (const c of OCULTAS_DE_FABRICA) if (!mostradas.has(c)) ocultas.add(c);
 // Orden guardado, sin columnas que ya no existen y con las nuevas al final (por si se agrega una columna en el servidor).
 const guardado = (leerJson(CLAVE_ORDEN) ?? []).filter((c) => BASE.includes(c));
 let orden = [...new Set([...guardado, ...BASE])];
-const guardarOcultas = () => guardar(CLAVE, [...ocultas]);
+const guardarOcultas = () => {
+  guardar(CLAVE, [...ocultas].filter((c) => !OCULTAS_DE_FABRICA.has(c)));
+  guardar(CLAVE_MOSTRADAS, [...OCULTAS_DE_FABRICA].filter((c) => !ocultas.has(c)));
+};
 const guardarOrden = () => guardar(CLAVE_ORDEN, orden);
 
 function aplicarOcultas() {
@@ -367,6 +377,7 @@ function pintarLista(foco) {
       if (col === ULTIMA && i.checked) pintarMinis([...document.querySelectorAll("td.spark")].map((t) => t.dataset.codigo), pedido);
     });
     l.append(i, document.createTextNode(` ${TITULOS[col]}`));
+    if (GRUPOS[GRUPO_DE[col]]) l.append(Object.assign(document.createElement("small"), { className: "grupo", textContent: GRUPOS[GRUPO_DE[col]] }));
     item.append(asa, l);
     if (!fijaPos) {
       const sube = Object.assign(document.createElement("button"), { type: "button", className: "sube", textContent: "▲" });

@@ -1,5 +1,6 @@
 import express from "express";
 import { readFileSync } from "node:fs";
+import { K } from "./columnas.js";
 import { COLUMNAS, CAMPOS_FILTRO_LISTA, ErrorConsulta, MAX_PUNTOS, SERIES, leerConsulta, leerSerie, leerSeries, limpiarFila, limpiarSerie, proyeccion } from "./consulta.js";
 import { paginaStock } from "./pagina.js";
 
@@ -20,14 +21,9 @@ export const COLECCION = "stock_snapshot";
 const leer = (n) => readFileSync(new URL(n, import.meta.url), "utf8");
 
 const INDICES = [
-  [{ codigo: 1, fecha: 1 }, { unique: true }],
-  [{ fecha: -1, codigo: 1 }, {}],
-  [{ segmento: 1, fecha: -1 }, {}],
-  [{ rotacion: 1, fecha: -1 }, {}],
-  [{ estado: 1, fecha: -1 }, {}],
-  [{ grado: 1, fecha: -1 }, {}],
-  [{ marca: 1, fecha: -1 }, {}],
-  [{ urgente: 1, fecha: -1 }, {}],
+  [{ [K("codigo")]: 1, [K("fecha")]: 1 }, { unique: true }],
+  [{ [K("fecha")]: -1, [K("codigo")]: 1 }, {}],
+  ...["segmento", "rotacion", "estado", "grado", "marca", "urgente"].map((c) => [{ [K(c)]: 1, [K("fecha")]: -1 }, {}]),
 ];
 
 /**
@@ -81,7 +77,7 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
       if (!listas || listas.vence <= ahora()) {
         const valores = {};
         for (const c of CAMPOS_FILTRO_LISTA) {
-          valores[c] = (await coleccion().distinct(c)).filter((v) => typeof v === "string" && v).sort((a, b) => a.localeCompare(b, "es"));
+          valores[c] = (await coleccion().distinct(K(c))).filter((v) => typeof v === "string" && v).sort((a, b) => a.localeCompare(b, "es"));
         }
         listas = { valores, vence: ahora() + vigenciaListasMs };
       }
@@ -108,7 +104,7 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
   router.get("/api/serie", ...acceso, async (req, res, next) => {
     try {
       const { codigo, campo } = leerSerie(req.query);
-      const docs = await coleccion().find({ codigo }, { projection: { _id: 0, fecha: 1, [campo]: 1 } }).sort({ fecha: 1 }).limit(MAX_PUNTOS).toArray();
+      const docs = await coleccion().find({ [K("codigo")]: codigo }, { projection: { _id: 0, [K("fecha")]: 1, [K(campo)]: 1 } }).sort({ [K("fecha")]: 1 }).limit(MAX_PUNTOS).toArray();
       res.json({ codigo, campo, series: SERIES, puntos: limpiarSerie(docs, campo) });
     } catch (e) {
       next(e);
@@ -119,12 +115,12 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
     try {
       const { codigos, campo } = leerSeries(req.query);
       const docs = await coleccion()
-        .find({ codigo: { $in: codigos } }, { projection: { _id: 0, codigo: 1, fecha: 1, [campo]: 1 } })
-        .sort({ codigo: 1, fecha: 1 })
+        .find({ [K("codigo")]: { $in: codigos } }, { projection: { _id: 0, [K("codigo")]: 1, [K("fecha")]: 1, [K(campo)]: 1 } })
+        .sort({ [K("codigo")]: 1, [K("fecha")]: 1 })
         .limit(codigos.length * MAX_PUNTOS)
         .toArray();
       const porCodigo = Object.fromEntries(codigos.map((c) => [c, []]));
-      for (const c of codigos) porCodigo[c] = limpiarSerie(docs.filter((d) => d.codigo === c), campo);
+      for (const c of codigos) porCodigo[c] = limpiarSerie(docs.filter((d) => d[K("codigo")] === c), campo);
       res.json({ campo, series: SERIES, porCodigo });
     } catch (e) {
       next(e);

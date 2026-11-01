@@ -8,7 +8,7 @@ export function paginaStock({ base, login }) {
   const selects = CAMPOS_FILTRO_LISTA.map(
     (c) => `<label>${ETIQUETA[c]}<select name="${c}" data-lista="${c}" multiple size="4"></select></label>`,
   ).join("\n");
-  const cabecera = COLUMNAS.map((c) => `<th data-campo="${c.campo}" data-col="${c.campo}" data-tipo="${c.tipo}" scope="col"><button type="button">${esc(c.titulo)}</button></th>`).join("");
+  const cabecera = COLUMNAS.map((c) => `<th data-campo="${c.campo}" data-col="${c.campo}" data-tipo="${c.tipo}" data-grupo="${c.grupo}"${c.oculta ? ' data-oculta="1"' : ""} scope="col"><button type="button">${esc(c.titulo)}</button></th>`).join("");
   return `<!doctype html>
 <html lang="es">
 <head>

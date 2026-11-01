@@ -26,10 +26,10 @@ th[aria-sort=ascending] button::after { content:" ▲"; } th[aria-sort=descendin
 td.num { text-align:right; font-variant-numeric:tabular-nums; }
 tr.urgente { background:var(--urgente); }
 /* Texto largo: se parte en varias líneas dentro de un ancho razonable en vez de recortarse. */
-td[data-col=detalle], td[data-col=motivo], td[data-col=recomendacion],
-th[data-col=detalle], th[data-col=motivo], th[data-col=recomendacion] { white-space:normal; overflow-wrap:break-word; }
+td[data-col=detalle], td[data-col=motivo], td[data-col=recomendacion], td[data-col=equivalente_stock], td[data-col=codigos_equivalentes],
+th[data-col=detalle], th[data-col=motivo], th[data-col=recomendacion], th[data-col=equivalente_stock], th[data-col=codigos_equivalentes] { white-space:normal; overflow-wrap:break-word; }
 td[data-col=detalle] { min-width:170px; max-width:300px; }
-td[data-col=motivo], td[data-col=recomendacion] { min-width:220px; max-width:420px; line-height:1.35; }
+td[data-col=motivo], td[data-col=recomendacion], td[data-col=equivalente_stock], td[data-col=codigos_equivalentes] { min-width:220px; max-width:420px; line-height:1.35; }
 #paginacion { display:flex; gap:12px; align-items:center; justify-content:center; margin:14px 0; }
 @media (max-width:600px) { #filtros { grid-template-columns:1fr 1fr; } }
 
@@ -81,3 +81,4 @@ td.pide.alto { color:#1d1d1b; }
 #leyenda .muestra.pedido { background:var(--amarillo); }
 #leyenda .sep { width:12px; }
 #leyenda .rampa { display:inline-block; width:90px; height:10px; border-radius:3px; border:1px solid var(--borde); background:linear-gradient(to right, color-mix(in srgb, var(--amarillo) 15%, var(--panel)), var(--amarillo)); }
+#lista-col .grupo { margin-left:6px; padding:0 6px; border:1px solid var(--borde); border-radius:999px; font-size:.65rem; color:var(--suave); white-space:nowrap; }
