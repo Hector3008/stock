@@ -1,7 +1,8 @@
 import express from "express";
 import { readFileSync } from "node:fs";
 import { K } from "./columnas.js";
-import { COLUMNAS, CAMPOS_FILTRO_LISTA, ErrorConsulta, MAX_PUNTOS, SERIES, leerConsulta, leerSerie, leerSeries, limpiarFila, limpiarSerie, proyeccion } from "./consulta.js";
+import { COLUMNAS, CAMPOS_FILTRO_LISTA, ErrorConsulta, ErrorLimite, MAX_PUNTOS, SERIES, leerConsulta, leerExportacion, leerSerie, leerSeries, limpiarFila, limpiarSerie, proyeccion, proyeccionPara } from "./consulta.js";
+import { describirFiltros, escribirPdf, escribirXlsx, planPdf } from "./exportar.js";
 import { paginaStock } from "./pagina.js";
 
 // Visor de la snapshot diaria código×día. Se monta en el gateway como un router más:
@@ -14,10 +15,19 @@ import { paginaStock } from "./pagina.js";
 //   GET /api/filtros valores para los selectores (grado, segmento, rotación, estado, marca)
 //   GET /api/datos   filas paginadas (10 o 20) con filtros y orden en el servidor
 //   GET /api/series  la misma evolución de todos los códigos de la página de una vez (?codigos=ZM1|ZM2): una columna de líneas pequeñas
+//   GET /api/exportar  la vista actual (filtros, columnas visibles y orden) como Excel o PDF; ver LIMITES_EXPORTACION
 //   GET /api/serie   evolución de un código en el tiempo (?codigo=&campo=total|cobertura_dias|…) para el gráfico de línea de cada fila
 
 export const PERMISO = "stock:leer";
 export const COLECCION = "stock_snapshot";
+// Topes de la exportación (variables de entorno STOCK_EXPORT_*): por encima del tope de filas se rechaza con un aviso, y el Excel
+// con más filas que FORMATO_XLSX sale sin colores (cada casilla coloreada es un estilo más y el archivo crece mucho).
+const entero = (v, por) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : por);
+export const limitesExportacion = (env = process.env) => ({
+  maxXlsx: entero(env.STOCK_EXPORT_MAX_XLSX, 100000),
+  maxPdf: entero(env.STOCK_EXPORT_MAX_PDF, 2000),
+  formatoXlsx: entero(env.STOCK_EXPORT_FORMATO_XLSX, 20000),
+});
 const leer = (n) => readFileSync(new URL(n, import.meta.url), "utf8");
 
 const INDICES = [
@@ -52,6 +62,7 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
   if (!habilitado) return router; // desactivado: todo responde 503 y no se toca el núcleo
 
   const coleccion = () => db.collection(COLECCION);
+  const limites = limitesExportacion(env);
   const js = leer("cliente/app.js");
   const css = leer("cliente/estilo.css");
 
@@ -127,9 +138,49 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
     }
   });
 
+  const hoy = () => new Date(ahora()).toISOString().slice(0, 10);
+  router.get("/api/exportar", ...acceso, async (req, res, next) => {
+    let cursor;
+    try {
+      const { formato, columnas } = leerExportacion(req.query);
+      const { filtro, orden } = leerConsulta({ ...req.query, tamano: "10", pagina: "1" });
+      const vacio = Object.keys(filtro).length === 0;
+      const total = vacio ? await coleccion().estimatedDocumentCount() : await coleccion().countDocuments(filtro);
+      const tope = formato === "pdf" ? limites.maxPdf : limites.maxXlsx;
+      if (total > tope) {
+        throw new ErrorLimite(`Hay ${total.toLocaleString("es-PE")} filas y un ${formato === "pdf" ? "PDF" : "Excel"} admite hasta ${tope.toLocaleString("es-PE")}. Aplica filtros (por ejemplo un rango de fechas) para reducirlas.`);
+      }
+      if (formato === "pdf") { const plan = planPdf(columnas); if (plan.error) throw new ErrorLimite(plan.error); }
+      const conFormato = formato === "pdf" || total <= limites.formatoXlsx;
+      cursor = coleccion().find(filtro, { projection: proyeccionPara(columnas, conFormato) }).sort(orden).batchSize(1000);
+      async function* filas() { for await (const d of cursor) yield limpiarFila(d); }
+      const lineas = [`Generado: ${hoy()}`, `Filas: ${total.toLocaleString("es-PE")}`, `Filtros: ${describirFiltros(req.query)}`];
+      res.set({
+        "Content-Type": formato === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="stock-${hoy()}.${formato}"`,
+        "X-Stock-Formato": conFormato ? "con-colores" : `sin-colores; limite=${limites.formatoXlsx}`,
+        "Access-Control-Expose-Headers": "X-Stock-Formato, Content-Disposition",
+      });
+      res.on("close", () => cursor.close?.().catch?.(() => {})); // si se cierra la pestaña a mitad, se libera la consulta
+      if (formato === "pdf") await escribirPdf({ salida: res, columnas, filas: filas(), titulo: "Stock · predicción diaria", lineas });
+      else {
+        await escribirXlsx({
+          salida: res, columnas, filas: filas(), conFormato,
+          resumen: [
+            "Generado\t" + hoy(), "Filas\t" + total, "Filtros\t" + describirFiltros(req.query),
+            "Formato condicional\t" + (conFormato ? "Incluido: stock agotado en rojo claro y pedido sugerido en amarillo (más intenso = mayor efectividad)" : `No incluido: hay más de ${limites.formatoXlsx.toLocaleString("es-PE")} filas`),
+          ],
+        });
+      }
+    } catch (e) {
+      if (res.headersSent) { res.destroy(e); return; } // ya se empezó a enviar el archivo: no se puede responder con un error limpio
+      next(e);
+    }
+  });
+
   // Errores del visor: los de validación como 400; el resto se registra y se responde sin detalles.
   router.use((err, req, res, next) => {
-    if (err instanceof ErrorConsulta) return res.status(400).json({ error: err.message });
+    if (err instanceof ErrorConsulta) return res.status(err.status ?? 400).json({ error: err.message });
     avisar(`[stock] error: ${err?.message ?? err}`);
     res.status(500).json({ error: "no se pudo leer el stock" });
   });

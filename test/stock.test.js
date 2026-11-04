@@ -6,6 +6,10 @@ import { leerConsulta, leerSerie, leerSeries, limpiarSerie, normalizar, limpiarF
 import { createRouter, PERMISO } from "../src/index.js";
 import { COLUMNAS, CORTO, INTERNOS } from "../src/columnas.js";
 import { readFileSync } from "node:fs";
+import ExcelJS from "exceljs";
+import { leerExportacion, ErrorLimite } from "../src/consulta.js";
+import { planPdf } from "../src/exportar.js";
+import { colorCasilla, amarilloHex, nivelIntensidad } from "../src/formato.js";
 
 describe("leerConsulta", () => {
   test("valores por defecto", () => {
@@ -266,4 +270,130 @@ test("la API devuelve nombres largos aunque Mongo guarde claves cortas", async (
   } finally {
     s.close();
   }
+});
+
+describe("exportación", () => {
+  const fila = (o) => ({ c: "UF-1", d: "Arrancador", f: new Date("2026-10-30T00:00:00Z"), m: "BOSCH", t: 50, pc: 0, pp: 0, ef: 0.5, ur: false, mt: "Error esperado 28%", ...o });
+  const DOCS = [fila({ c: "UF-1", t: 0, pc: 40, pp: 60, ef: 0.9 }), fila({ c: "UF-2", t: 30, pc: 9, pp: 12, ef: 0.2, ur: true }), fila({ c: "UF-3", t: 80, pc: 0, pp: 0, ef: null })];
+  function coleccion(total) {
+    const c = { llamadas: [] };
+    c.find = (filtro, opc) => {
+      c.llamadas.push(["find", filtro, opc.projection]);
+      const cur = { sort: (o) => ((c.orden = o), cur), batchSize: () => cur, close: async () => {}, async *[Symbol.asyncIterator]() { yield* DOCS; } };
+      return cur;
+    };
+    c.countDocuments = async () => total;
+    c.estimatedDocumentCount = async () => total;
+    c.createIndex = async () => {};
+    return c;
+  }
+  async function servir(env, total = 3) {
+    const col = coleccion(total);
+    const core = { autenticar: () => (q, r, n) => (sesionEx ? ((q.auth = { empresaId: "e1" }), n()) : r.status(401).json({ error: "sin sesión" })), requierePermiso: () => (q, r, n) => n() };
+    const app = express();
+    app.use("/stock", createRouter({ core, db: { collection: () => col }, env: { STOCK_EMPRESA_ID: "e1", ...env }, avisar: () => {} }));
+    const s = app.listen(0);
+    return { col, s, url: `http://127.0.0.1:${s.address().port}/stock/api/exportar` };
+  }
+  let sesionEx = true;
+  const leerXlsx = async (r) => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(Buffer.from(await r.arrayBuffer())); return wb; };
+
+  test("leerExportacion: formato y columnas válidos, en el orden pedido", () => {
+    const { formato, columnas } = leerExportacion({ formato: "xlsx", columnas: "pedido_central|codigo|total" });
+    assert.equal(formato, "xlsx");
+    assert.deepEqual(columnas.map((c) => c.campo), ["pedido_central", "codigo", "total"]);
+    assert.ok(leerExportacion({ formato: "pdf" }).columnas.length >= 23); // sin columnas: las visibles de fábrica
+    assert.throws(() => leerExportacion({ formato: "csv" }), ErrorConsulta);
+    assert.throws(() => leerExportacion({ formato: "xlsx", columnas: "codigo|codigo" }), ErrorConsulta);
+    assert.throws(() => leerExportacion({ formato: "xlsx", columnas: "codigo|$where" }), ErrorConsulta);
+  });
+  test("formato: agotado en rojo, pedido en amarillo según efectividad, y niveles para Excel", () => {
+    assert.equal(colorCasilla("total", { total: 0 }), "F6C4BF");
+    assert.equal(colorCasilla("total", { total: 5 }), null);
+    assert.equal(colorCasilla("total", { total: null }), null);
+    assert.equal(colorCasilla("pedido_central", { pedido_central: 0, efectividad: 1 }), null);
+    assert.notEqual(colorCasilla("pedido_central", { pedido_central: 9, efectividad: 0.1 }), colorCasilla("pedido_central", { pedido_central: 9, efectividad: 0.95 }));
+    assert.equal(amarilloHex(1), "F2C200");
+    assert.equal(nivelIntensidad(0.15), 0.125);
+    const niveles = new Set(Array.from({ length: 101 }, (_, i) => colorCasilla("pedido_central", { pedido_central: 1, efectividad: i / 100 }, true)));
+    assert.ok(niveles.size <= 8, `hasta 8 colores en Excel, hubo ${niveles.size}`);
+  });
+  test("Excel: columnas en el orden pedido, filtros aplicados y colores", async () => {
+    const { col, s, url } = await servir({});
+    try {
+      const r = await fetch(`${url}?formato=xlsx&columnas=codigo|pedido_central|total|urgente|fecha&grado=A&orden=total&dir=asc`);
+      assert.equal(r.status, 200);
+      assert.match(r.headers.get("content-type"), /spreadsheetml/);
+      assert.match(r.headers.get("content-disposition"), /attachment; filename="stock-\d{4}-\d{2}-\d{2}\.xlsx"/);
+      assert.equal(r.headers.get("x-stock-formato"), "con-colores");
+      const wb = await leerXlsx(r);
+      const ws = wb.getWorksheet("Stock");
+      assert.deepEqual(ws.getRow(1).values.slice(1), ["Código", "Pedido central", "Stock", "Urgente", "Fecha"]);
+      assert.equal(ws.rowCount, 4);
+      assert.deepEqual([ws.getRow(2).getCell(1).value, ws.getRow(2).getCell(2).value, ws.getRow(2).getCell(3).value, ws.getRow(2).getCell(4).value], ["UF-1", 40, 0, "No"]);
+      assert.equal(ws.getRow(3).getCell(4).value, "Sí");
+      assert.ok(ws.getRow(2).getCell(5).value instanceof Date);
+      assert.equal(ws.getRow(2).getCell(3).fill.fgColor.argb, "FFF6C4BF"); // stock 0 → rojo
+      assert.match(ws.getRow(2).getCell(2).fill.fgColor.argb, /^FFF/); // pedido > 0 → amarillo
+      assert.ok(!ws.getRow(4).getCell(2).fill || !ws.getRow(4).getCell(2).fill.fgColor); // pedido 0 → sin color
+      const resumen = wb.getWorksheet("Resumen");
+      assert.match(resumen.getRow(3).getCell(2).value, /Grado: A/);
+      // solo se piden a MongoDB las columnas elegidas más las dos que deciden los colores
+      const proy = col.llamadas.find((l) => l[0] === "find")[2];
+      assert.deepEqual(Object.keys(proy).sort(), ["_id", "c", "ef", "f", "pc", "t", "ur"].sort());
+      assert.deepEqual(col.orden, { t: 1, c: 1, f: -1 });
+      assert.deepEqual(col.llamadas.find((l) => l[0] === "find")[1], { gr: { $in: ["A"] } });
+    } finally { s.close(); }
+  });
+  test("Excel: con más filas que el límite de formato sale sin colores y lo avisa", async () => {
+    const { s, url } = await servir({ STOCK_EXPORT_FORMATO_XLSX: "2" }, 3);
+    try {
+      const r = await fetch(`${url}?formato=xlsx&columnas=codigo|total|pedido_central`);
+      assert.equal(r.status, 200);
+      assert.match(r.headers.get("x-stock-formato"), /^sin-colores; limite=2$/);
+      const wb = await leerXlsx(r);
+      const ws = wb.getWorksheet("Stock");
+      assert.equal(ws.rowCount, 4); // los datos están todos
+      for (let i = 2; i <= 4; i++) for (let j = 1; j <= 3; j++) assert.ok(!ws.getRow(i).getCell(j).fill || !ws.getRow(i).getCell(j).fill.fgColor, `fila ${i} col ${j} sin color`);
+      assert.match(wb.getWorksheet("Resumen").getRow(4).getCell(2).value, /No incluido/);
+    } finally { s.close(); }
+  });
+  test("Excel y PDF: sobre el tope de filas se rechaza con 413 y un mensaje útil", async () => {
+    const { s, url } = await servir({ STOCK_EXPORT_MAX_XLSX: "2", STOCK_EXPORT_MAX_PDF: "1" }, 3);
+    try {
+      for (const f of ["xlsx", "pdf"]) {
+        const r = await fetch(`${url}?formato=${f}&columnas=codigo|total`);
+        assert.equal(r.status, 413, f);
+        assert.match((await r.json()).error, /filtros/i);
+      }
+    } finally { s.close(); }
+  });
+  test("PDF: se genera con los colores; demasiadas columnas anchas dan 413", async () => {
+    const { s, url } = await servir({});
+    try {
+      const r = await fetch(`${url}?formato=pdf&columnas=fecha|codigo|detalle|marca|total|pedido_central|pedido_prudente|efectividad|motivo`);
+      assert.equal(r.status, 200);
+      assert.equal(r.headers.get("content-type"), "application/pdf");
+      const b = Buffer.from(await r.arrayBuffer());
+      assert.equal(b.subarray(0, 5).toString(), "%PDF-");
+      assert.ok(b.length > 2000);
+      const todas = COLUMNAS.map((c) => c.campo).join("|");
+      const r2 = await fetch(`${url}?formato=pdf&columnas=${todas}`);
+      assert.equal(r2.status, 413);
+      assert.match((await r2.json()).error, /demasiadas columnas/i);
+    } finally { s.close(); }
+    assert.equal(planPdf(COLUMNAS.slice(0, 8)).error, undefined);
+    assert.ok(planPdf(COLUMNAS).error);
+  });
+  test("exige sesión (401) y valida parámetros (400)", async () => {
+    const { s, url } = await servir({});
+    try {
+      sesionEx = false;
+      assert.equal((await fetch(`${url}?formato=xlsx`)).status, 401);
+      sesionEx = true;
+      assert.equal((await fetch(`${url}?formato=csv`)).status, 400);
+      assert.equal((await fetch(`${url}?formato=xlsx&columnas=nope`)).status, 400);
+      assert.equal((await fetch(`${url}?formato=xlsx&desde=ayer`)).status, 400);
+    } finally { sesionEx = true; s.close(); }
+  });
 });

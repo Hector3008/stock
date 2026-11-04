@@ -82,3 +82,6 @@ td.pide.alto { color:#1d1d1b; }
 #leyenda .sep { width:12px; }
 #leyenda .rampa { display:inline-block; width:90px; height:10px; border-radius:3px; border:1px solid var(--borde); background:linear-gradient(to right, color-mix(in srgb, var(--amarillo) 15%, var(--panel)), var(--amarillo)); }
 #lista-col .grupo { margin-left:6px; padding:0 6px; border:1px solid var(--borde); border-radius:999px; font-size:.65rem; color:var(--suave); white-space:nowrap; }
+
+.barra { display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; }
+.exportar { display:flex; gap:8px; }

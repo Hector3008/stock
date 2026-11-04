@@ -147,3 +147,33 @@ export function leerSeries(query = {}) {
   if (!SERIES.some((x) => x.campo === campo)) throw new ErrorConsulta("campo no válido");
   return { codigos, campo };
 }
+
+/** Una exportación que pasa un tope: 413 con un mensaje que dice qué hacer. */
+export class ErrorLimite extends ErrorConsulta {
+  constructor(mensaje) {
+    super(mensaje);
+    this.status = 413;
+  }
+}
+
+export const FORMATOS_EXPORTACION = ["xlsx", "pdf"];
+
+/** ?formato=xlsx|pdf&columnas=fecha|codigo|… → { formato, columnas } con las columnas del catálogo en ese orden. */
+export function leerExportacion(query = {}) {
+  const formato = uno(query.formato);
+  if (!FORMATOS_EXPORTACION.includes(formato)) throw new ErrorConsulta("formato debe ser xlsx o pdf");
+  const pedidas = String(uno(query.columnas) ?? "").split("|").map((c) => c.trim()).filter(Boolean);
+  if (new Set(pedidas).size !== pedidas.length) throw new ErrorConsulta("columnas tiene valores repetidos");
+  if (pedidas.length > COLUMNAS.length) throw new ErrorConsulta("columnas tiene demasiados valores");
+  const porCampo = new Map(COLUMNAS.map((c) => [c.campo, c]));
+  const columnas = pedidas.length ? pedidas.map((c) => porCampo.get(c) ?? null) : COLUMNAS.filter((c) => !c.oculta);
+  if (columnas.includes(null)) throw new ErrorConsulta("columnas tiene un nombre no válido");
+  return { formato, columnas };
+}
+
+/** Solo lo que hace falta leer de MongoDB: las columnas pedidas y las dos que deciden los colores. */
+export function proyeccionPara(columnas, conFormato) {
+  const campos = new Set(columnas.map((c) => c.campo));
+  if (conFormato) { campos.add("total"); campos.add("efectividad"); }
+  return { _id: 0, ...Object.fromEntries([...campos].map((c) => [K(c), 1])) };
+}

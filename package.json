@@ -4,11 +4,29 @@
   "description": "Visor de la snapshot diaria de stock (código × día): router de Express para montar en el gateway",
   "type": "module",
   "main": "src/index.js",
-  "exports": { ".": "./src/index.js" },
-  "files": ["src", "herramientas", "README.md"],
-  "scripts": { "test": "node --test test/*.test.js" },
-  "peerDependencies": { "express": "^5.2.1" },
-  "devDependencies": { "express": "^5.2.1" },
-  "engines": { "node": "22.x" },
-  "license": "ISC"
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "herramientas",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "peerDependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "express": "^5.2.1"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "pdfkit": "^0.20.2"
+  }
 }

@@ -46,3 +46,15 @@ npm test
 ```
 
 Con un núcleo y una colección falsos; no necesitan MongoDB.
+
+## Exportar a Excel y PDF
+
+Los botones «Excel» y «PDF» descargan la vista actual (filtros, orden y columnas visibles). Límites por variable de entorno (opcionales):
+
+| Variable | Defecto | Efecto |
+|---|---|---|
+| `STOCK_EXPORT_MAX_XLSX` | 100000 | más filas → 413, hay que filtrar |
+| `STOCK_EXPORT_MAX_PDF` | 2000 | ídem para PDF |
+| `STOCK_EXPORT_FORMATO_XLSX` | 20000 | más filas → Excel sin formato condicional (más liviano) |
+
+Dependencias: `exceljs`, `pdfkit`.

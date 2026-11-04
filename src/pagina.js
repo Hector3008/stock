@@ -21,6 +21,11 @@ export function paginaStock({ base, login }) {
 <body data-api="${esc(base)}/api" data-cuenta="${esc(login)}">
 <header>
   <div><h1>Stock · predicción diaria</h1><p id="resumen" aria-live="polite"></p></div>
+  <div class="barra">
+  <div class="exportar" role="group" aria-label="Exportar la vista actual">
+    <button type="button" id="exp-xlsx" title="Excel con los filtros, las columnas visibles y su orden">Exportar Excel</button>
+    <button type="button" id="exp-pdf" title="PDF con los filtros, las columnas visibles y su orden">Exportar PDF</button>
+  </div>
   <div class="columnas">
     <button type="button" id="btn-col" aria-expanded="false" aria-controls="panel-col">Columnas ▾</button>
     <div id="panel-col" role="group" aria-label="Columnas visibles" hidden>
@@ -28,6 +33,7 @@ export function paginaStock({ base, login }) {
       <div id="lista-col"></div>
       <div class="acciones"><button type="button" id="col-todas">Mostrar todas</button><button type="button" id="col-basicas">Solo básicas</button><button type="button" id="col-orden">Orden original</button></div>
     </div>
+  </div>
   </div>
 </header>
 <main>

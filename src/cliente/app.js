@@ -191,12 +191,14 @@ function mini(puntos) {
   const ms = puntos.map((p) => Date.parse(`${p.fecha}T00:00:00Z`));
   const x0 = ms[0], x1 = ms.at(-1);
   const vs = puntos.map((p) => p.valor);
-  const lo = Math.min(...vs), hi = Math.max(...vs), rango = hi - lo || 1;
+  const mn = Math.min(...vs), mx = Math.max(...vs);
+  // El eje parte de 0 (como el gráfico grande) para no exagerar variaciones pequeñas.
+  const lo = Math.min(0, mn), hi = Math.max(0, mx), rango = hi - lo || 1;
   const X = (t) => m + ((t - x0) / (x1 - x0)) * (W - 2 * m);
   const Y = (v) => H - m - ((v - lo) / rango) * (H - 2 * m);
   const g = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Stock de ${puntos[0].fecha} a ${puntos.at(-1).fecha}` });
   g.append(
-    svg("title", {}, `${puntos[0].fecha} → ${puntos.at(-1).fecha}\nPrimero ${num(vs[0])} · Último ${num(vs.at(-1))} · Mín ${num(lo)} · Máx ${num(hi)}`),
+    svg("title", {}, `${puntos[0].fecha} → ${puntos.at(-1).fecha}\nPrimero ${num(vs[0])} · Último ${num(vs.at(-1))} · Mín ${num(mn)} · Máx ${num(mx)}`),
     svg("polyline", { class: "mini", points: puntos.map((p, i) => `${X(ms[i]).toFixed(1)},${Y(p.valor).toFixed(1)}`).join(" ") }),
     svg("circle", { class: "fin", r: 2.5, cx: X(x1).toFixed(1), cy: Y(vs.at(-1)).toFixed(1) }),
   );
@@ -286,6 +288,41 @@ function dibujar(puntos) {
   caja.append(g, tip);
   return caja;
 }
+
+// ---------- exportar a Excel o PDF ----------
+// Manda al servidor lo que ves: los filtros del formulario, el orden de la tabla y las columnas visibles en su orden actual.
+async function exportar(formato) {
+  const botones = [$("#exp-xlsx"), $("#exp-pdf")];
+  const p = parametros();
+  p.delete("pagina");
+  p.set("formato", formato);
+  p.set("columnas", [...document.querySelectorAll("thead th[data-col]")].filter((t) => !t.hidden && t.dataset.col !== "spark").map((t) => t.dataset.col).join("|"));
+  for (const b of botones) b.disabled = true;
+  aviso(`Generando ${formato === "pdf" ? "el PDF" : "el Excel"}…`);
+  try {
+    const r = await fetch(`${api}/exportar?${p}`, { credentials: "same-origin" });
+    if (!r.ok) {
+      const cuerpo = await r.json().catch(() => ({}));
+      aviso(r.status === 401 ? "Tu sesión venció: vuelve a entrar." : r.status === 403 ? "Tu usuario no tiene permiso para ver el stock (stock:leer)." : cuerpo.error ?? `No se pudo exportar (error ${r.status}).`, true);
+      return;
+    }
+    const nombre = /filename="([^"]+)"/.exec(r.headers.get("content-disposition") ?? "")?.[1] ?? `stock.${formato}`;
+    const url = URL.createObjectURL(await r.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: nombre });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    const sin = /sin-colores; limite=(\d+)/.exec(r.headers.get("x-stock-formato") ?? "");
+    aviso(sin ? `Excel exportado sin colores: hay más de ${Number(sin[1]).toLocaleString("es-PE")} filas y con colores el archivo pesaría demasiado. Con menos filas (usa filtros) sale con colores.` : `${nombre} descargado.`);
+  } catch {
+    aviso("No se pudo exportar: revisa tu conexión e inténtalo de nuevo.", true);
+  } finally {
+    for (const b of botones) b.disabled = false;
+  }
+}
+$("#exp-xlsx").addEventListener("click", () => exportar("xlsx"));
+$("#exp-pdf").addEventListener("click", () => exportar("pdf"));
 
 // ---------- panel de columnas: visibilidad y orden ----------
 const CLAVE = "stock:columnas-ocultas";
