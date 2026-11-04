@@ -57,4 +57,8 @@ Los botones «Excel» y «PDF» descargan la vista actual (filtros, orden y colu
 | `STOCK_EXPORT_MAX_PDF` | 2000 | ídem para PDF |
 | `STOCK_EXPORT_FORMATO_XLSX` | 20000 | más filas → Excel sin formato condicional (más liviano) |
 
-Dependencias: `exceljs`, `pdfkit`.
+| `STOCK_EXPORT_GRAFICO_XLSX` | 5000 | más filas → Excel sin la columna de gráficos |
+
+El PDF usa A4 apaisada o A3 según las columnas. La columna «Evolución del stock» se exporta como línea en el PDF y como minigráfico (sparkline) en el Excel.
+
+Dependencias: `exceljs`, `pdfkit`, `jszip`.

@@ -27,6 +27,7 @@ export const limitesExportacion = (env = process.env) => ({
   maxXlsx: entero(env.STOCK_EXPORT_MAX_XLSX, 100000),
   maxPdf: entero(env.STOCK_EXPORT_MAX_PDF, 2000),
   formatoXlsx: entero(env.STOCK_EXPORT_FORMATO_XLSX, 20000),
+  graficoXlsx: entero(env.STOCK_EXPORT_GRAFICO_XLSX, 5000), // más filas que esto: el Excel sale sin la columna de gráficos
 });
 const leer = (n) => readFileSync(new URL(n, import.meta.url), "utf8");
 
@@ -139,6 +140,21 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
   });
 
   const hoy = () => new Date(ahora()).toISOString().slice(0, 10);
+  // La serie de stock de varios códigos de una vez (para los gráficos de la exportación): una consulta por lote, por el índice código+fecha.
+  async function leerSeriesDe(codigos) {
+    const unicos = [...new Set(codigos.filter(Boolean))];
+    const porCodigo = new Map();
+    if (!unicos.length) return porCodigo;
+    const docs = coleccion().find({ [K("codigo")]: { $in: unicos } }, { projection: { _id: 0, [K("codigo")]: 1, [K("fecha")]: 1, [K("total")]: 1 } }).sort({ [K("codigo")]: 1, [K("fecha")]: 1 });
+    for await (const d of docs) {
+      const v = d[K("total")];
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      const c = d[K("codigo")];
+      (porCodigo.get(c) ?? porCodigo.set(c, []).get(c)).push(v);
+    }
+    return porCodigo;
+  }
+
   router.get("/api/exportar", ...acceso, async (req, res, next) => {
     let cursor;
     try {
@@ -152,20 +168,40 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
       }
       if (formato === "pdf") { const plan = planPdf(columnas); if (plan.error) throw new ErrorLimite(plan.error); }
       const conFormato = formato === "pdf" || total <= limites.formatoXlsx;
-      cursor = coleccion().find(filtro, { projection: proyeccionPara(columnas, conFormato) }).sort(orden).batchSize(1000);
-      async function* filas() { for await (const d of cursor) yield limpiarFila(d); }
+      // Excel con muchas filas: sin la columna de gráficos (cada línea es una consulta de serie y un objeto más en el archivo).
+      const sinGrafico = formato === "xlsx" && total > limites.graficoXlsx && columnas.some((c) => c.tipo === "serie");
+      const cols = sinGrafico ? columnas.filter((c) => c.tipo !== "serie") : columnas;
+      const conGrafico = cols.some((c) => c.tipo === "serie");
+      cursor = coleccion().find(filtro, { projection: proyeccionPara(cols, conFormato) }).sort(orden).batchSize(1000);
+      async function* filas() {
+        let lote = [];
+        const vaciar = async function* () {
+          if (conGrafico) {
+            const series = await leerSeriesDe(lote.map((f) => f.codigo));
+            for (const f of lote) f.spark = series.get(f.codigo) ?? [];
+          }
+          yield* lote;
+          lote = [];
+        };
+        for await (const d of cursor) {
+          lote.push(limpiarFila(d));
+          if (lote.length >= 100) yield* vaciar();
+        }
+        yield* vaciar();
+      }
       const lineas = [`Generado: ${hoy()}`, `Filas: ${total.toLocaleString("es-PE")}`, `Filtros: ${describirFiltros(req.query)}`];
       res.set({
         "Content-Type": formato === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="stock-${hoy()}.${formato}"`,
         "X-Stock-Formato": conFormato ? "con-colores" : `sin-colores; limite=${limites.formatoXlsx}`,
-        "Access-Control-Expose-Headers": "X-Stock-Formato, Content-Disposition",
+        "X-Stock-Grafico": sinGrafico ? `omitido; limite=${limites.graficoXlsx}` : conGrafico ? "incluido" : "no-pedido",
+        "Access-Control-Expose-Headers": "X-Stock-Formato, X-Stock-Grafico, Content-Disposition",
       });
       res.on("close", () => cursor.close?.().catch?.(() => {})); // si se cierra la pestaña a mitad, se libera la consulta
-      if (formato === "pdf") await escribirPdf({ salida: res, columnas, filas: filas(), titulo: "Stock · predicción diaria", lineas });
+      if (formato === "pdf") await escribirPdf({ salida: res, columnas: cols, filas: filas(), titulo: "Stock · predicción diaria", lineas });
       else {
         await escribirXlsx({
-          salida: res, columnas, filas: filas(), conFormato,
+          salida: res, columnas: cols, filas: filas(), conFormato,
           resumen: [
             "Generado\t" + hoy(), "Filas\t" + total, "Filtros\t" + describirFiltros(req.query),
             "Formato condicional\t" + (conFormato ? "Incluido: stock agotado en rojo claro y pedido sugerido en amarillo (más intenso = mayor efectividad)" : `No incluido: hay más de ${limites.formatoXlsx.toLocaleString("es-PE")} filas`),

@@ -157,6 +157,8 @@ export class ErrorLimite extends ErrorConsulta {
 }
 
 export const FORMATOS_EXPORTACION = ["xlsx", "pdf"];
+/** La columna «Evolución del stock» no está en el catálogo (no es un campo guardado): en la exportación se arma con la serie de cada código. */
+export const COLUMNA_EVOLUCION = { campo: "spark", corto: null, titulo: "Evolución del stock", tipo: "serie", grupo: "base", oculta: false };
 
 /** ?formato=xlsx|pdf&columnas=fecha|codigo|… → { formato, columnas } con las columnas del catálogo en ese orden. */
 export function leerExportacion(query = {}) {
@@ -164,8 +166,9 @@ export function leerExportacion(query = {}) {
   if (!FORMATOS_EXPORTACION.includes(formato)) throw new ErrorConsulta("formato debe ser xlsx o pdf");
   const pedidas = String(uno(query.columnas) ?? "").split("|").map((c) => c.trim()).filter(Boolean);
   if (new Set(pedidas).size !== pedidas.length) throw new ErrorConsulta("columnas tiene valores repetidos");
-  if (pedidas.length > COLUMNAS.length) throw new ErrorConsulta("columnas tiene demasiados valores");
+  if (pedidas.length > COLUMNAS.length + 1) throw new ErrorConsulta("columnas tiene demasiados valores");
   const porCampo = new Map(COLUMNAS.map((c) => [c.campo, c]));
+  porCampo.set("spark", COLUMNA_EVOLUCION);
   const columnas = pedidas.length ? pedidas.map((c) => porCampo.get(c) ?? null) : COLUMNAS.filter((c) => !c.oculta);
   if (columnas.includes(null)) throw new ErrorConsulta("columnas tiene un nombre no válido");
   return { formato, columnas };
@@ -173,7 +176,8 @@ export function leerExportacion(query = {}) {
 
 /** Solo lo que hace falta leer de MongoDB: las columnas pedidas y las dos que deciden los colores. */
 export function proyeccionPara(columnas, conFormato) {
-  const campos = new Set(columnas.map((c) => c.campo));
+  const campos = new Set(columnas.filter((c) => c.tipo !== "serie").map((c) => c.campo));
+  if (columnas.some((c) => c.tipo === "serie")) campos.add("codigo"); // la serie se pide por código aunque la columna no se muestre
   if (conFormato) { campos.add("total"); campos.add("efectividad"); }
   return { _id: 0, ...Object.fromEntries([...campos].map((c) => [K(c), 1])) };
 }

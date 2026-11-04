@@ -296,7 +296,7 @@ async function exportar(formato) {
   const p = parametros();
   p.delete("pagina");
   p.set("formato", formato);
-  p.set("columnas", [...document.querySelectorAll("thead th[data-col]")].filter((t) => !t.hidden && t.dataset.col !== "spark").map((t) => t.dataset.col).join("|"));
+  p.set("columnas", [...document.querySelectorAll("thead th[data-col]")].filter((t) => !t.hidden).map((t) => t.dataset.col).join("|"));
   for (const b of botones) b.disabled = true;
   aviso(`Generando ${formato === "pdf" ? "el PDF" : "el Excel"}…`);
   try {
@@ -314,7 +314,11 @@ async function exportar(formato) {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
     const sin = /sin-colores; limite=(\d+)/.exec(r.headers.get("x-stock-formato") ?? "");
-    aviso(sin ? `Excel exportado sin colores: hay más de ${Number(sin[1]).toLocaleString("es-PE")} filas y con colores el archivo pesaría demasiado. Con menos filas (usa filtros) sale con colores.` : `${nombre} descargado.`);
+    const sinGraf = /omitido; limite=(\d+)/.exec(r.headers.get("x-stock-grafico") ?? "");
+    const avisos = [];
+    if (sin) avisos.push(`sin colores (hay más de ${Number(sin[1]).toLocaleString("es-PE")} filas y con colores pesaría demasiado)`);
+    if (sinGraf) avisos.push(`sin la columna de gráficos (solo se incluye hasta ${Number(sinGraf[1]).toLocaleString("es-PE")} filas)`);
+    aviso(avisos.length ? `Excel exportado ${avisos.join(" y ")}. Con menos filas (usa filtros) sale completo.` : `${nombre} descargado.`);
   } catch {
     aviso("No se pudo exportar: revisa tu conexión e inténtalo de nuevo.", true);
   } finally {

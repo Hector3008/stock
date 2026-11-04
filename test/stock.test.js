@@ -8,7 +8,8 @@ import { COLUMNAS, CORTO, INTERNOS } from "../src/columnas.js";
 import { readFileSync } from "node:fs";
 import ExcelJS from "exceljs";
 import { leerExportacion, ErrorLimite } from "../src/consulta.js";
-import { planPdf } from "../src/exportar.js";
+import { planPdf, muestrear } from "../src/exportar.js";
+import JSZip from "jszip";
 import { colorCasilla, amarilloHex, nivelIntensidad } from "../src/formato.js";
 
 describe("leerConsulta", () => {
@@ -384,6 +385,45 @@ describe("exportación", () => {
     } finally { s.close(); }
     assert.equal(planPdf(COLUMNAS.slice(0, 8)).error, undefined);
     assert.ok(planPdf(COLUMNAS).error);
+  });
+  test("gráficos: PDF y Excel llevan la columna de evolución (una consulta de series por lote) y el Excel la omite sobre su tope", async () => {
+    const { col, s, url } = await servir({ STOCK_EXPORT_GRAFICO_XLSX: "5" }, 3);
+    try {
+      const q = "columnas=codigo|detalle|total|spark";
+      const x = await fetch(`${url}?formato=xlsx&${q}`);
+      assert.equal(x.status, 200);
+      assert.equal(x.headers.get("x-stock-grafico"), "incluido");
+      const zip = await JSZip.loadAsync(Buffer.from(await x.arrayBuffer()));
+      const hoja = await zip.file("xl/worksheets/sheet1.xml").async("string");
+      assert.equal((hoja.match(/<x14:sparkline>/g) ?? []).length, 3); // una línea por fila
+      assert.match(hoja, /<xm:sqref>D2<\/xm:sqref>/); // en la columna de evolución (la cuarta)
+      assert.match(hoja, /displayHidden="1"/); // los puntos están en columnas ocultas
+      const series = col.llamadas.filter((l) => l[0] === "find" && l[1].c?.$in);
+      assert.equal(series.length, 1); // los tres códigos en un solo lote
+      assert.ok(!("spark" in series[0][2]));
+      const p = await fetch(`${url}?formato=pdf&${q}`);
+      assert.equal(p.status, 200);
+      assert.equal(Buffer.from(await p.arrayBuffer()).subarray(0, 5).toString(), "%PDF-");
+      // sobre el tope del Excel: sin gráficos, con aviso en la cabecera
+      const { s: s2, url: url2 } = await servir({ STOCK_EXPORT_GRAFICO_XLSX: "2" }, 3);
+      try {
+        const r = await fetch(`${url2}?formato=xlsx&${q}`);
+        assert.match(r.headers.get("x-stock-grafico"), /^omitido; limite=2$/);
+        const wb = await leerXlsx(r);
+        assert.deepEqual(wb.getWorksheet("Stock").getRow(1).values.slice(1), ["Código", "Detalle", "Stock"]);
+      } finally { s2.close(); }
+    } finally { s.close(); }
+  });
+  test("PDF: pocas columnas → A4 apaisada y ocupan todo el ancho; muchas → A3", () => {
+    const pocas = planPdf(COLUMNAS.filter((c) => ["fecha", "codigo", "detalle", "total", "cobertura_dias", "urgente"].includes(c.campo)));
+    assert.equal(pocas.pagina.nombre, "A4");
+    assert.ok(Math.abs(pocas.anchos.reduce((a, b) => a + b, 0) - (pocas.pagina.ancho - 48)) < 0.01); // sin hueco a la derecha
+    assert.equal(planPdf(COLUMNAS.slice(0, 23)).pagina.nombre, "A3");
+    assert.deepEqual(muestrear([1, 2, 3], 10), [1, 2, 3]);
+    const m = muestrear(Array.from({ length: 100 }, (_, i) => i), 30);
+    assert.equal(m.length, 30);
+    assert.equal(m[0], 0);
+    assert.equal(m.at(-1), 99);
   });
   test("exige sesión (401) y valida parámetros (400)", async () => {
     const { s, url } = await servir({});
