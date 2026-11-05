@@ -22,13 +22,16 @@ const letra = (n) => { let s = ""; for (; n > 0; n = Math.floor((n - 1) / 26)) s
 const sinControl = (t) => String(t).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");
 
 // ---------- descripción de los filtros (hoja «Resumen» y encabezado del PDF) ----------
-const ETIQUETAS = { codigo: "Código", detalle: "Detalle", desde: "Desde", hasta: "Hasta", grado: "Grado", segmento: "Segmento", rotacion: "Rotación", estado: "Estado", marca: "Marca", urgente: "Urgente" };
+const ETIQUETAS = { codigo: "Código", detalle: "Detalle", ultima: "Solo la última fecha", desde: "Desde", hasta: "Hasta", grado: "Grado", segmento: "Segmento", rotacion: "Rotación", estado: "Estado", marca: "Marca", urgente: "Urgente" };
 const uno = (v) => (Array.isArray(v) ? v.join(", ") : v);
 export function describirFiltros(query = {}) {
   const partes = [];
+  const ultima = ["1", "si"].includes(String(uno(query.ultima) ?? ""));
   for (const [k, etiqueta] of Object.entries(ETIQUETAS)) {
     const v = uno(query[k]);
     if (v === undefined || v === "") continue;
+    if (k === "ultima") { if (ultima) partes.push(`Solo la última fecha${query.desde ? ` (${uno(query.desde)})` : ""}`); continue; }
+    if (ultima && (k === "desde" || k === "hasta")) continue;
     partes.push(`${etiqueta}: ${String(v).split("|").join(", ")}`);
   }
   return partes.length ? partes.join(" · ") : "Sin filtros";

@@ -99,9 +99,18 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
     }
   });
 
+  // «Solo la última fecha»: ?ultima=1 se traduce a desde = hasta = la fecha más reciente de la colección (pisa el rango que se haya puesto).
+  async function conUltimaFecha(query) {
+    if (!["1", "si"].includes(String(Array.isArray(query.ultima) ? query.ultima[0] : query.ultima ?? ""))) return query;
+    const [d] = await coleccion().find({}, { projection: { _id: 0, [K("fecha")]: 1 } }).sort({ [K("fecha")]: -1 }).limit(1).toArray();
+    const f = d?.[K("fecha")];
+    const iso = f instanceof Date ? f.toISOString().slice(0, 10) : null;
+    return iso ? { ...query, desde: iso, hasta: iso } : query;
+  }
+
   router.get("/api/datos", ...acceso, async (req, res, next) => {
     try {
-      const { filtro, orden, pagina, tamano } = leerConsulta(req.query);
+      const { filtro, orden, pagina, tamano } = leerConsulta(await conUltimaFecha(req.query));
       const vacio = Object.keys(filtro).length === 0;
       const [filas, total] = await Promise.all([
         coleccion().find(filtro, { projection: proyeccion() }).sort(orden).skip((pagina - 1) * tamano).limit(tamano).toArray(),
@@ -159,7 +168,8 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
     let cursor;
     try {
       const { formato, columnas } = leerExportacion(req.query);
-      const { filtro, orden } = leerConsulta({ ...req.query, tamano: "10", pagina: "1" });
+      const consulta = await conUltimaFecha(req.query);
+      const { filtro, orden } = leerConsulta({ ...consulta, tamano: "10", pagina: "1" });
       const vacio = Object.keys(filtro).length === 0;
       const total = vacio ? await coleccion().estimatedDocumentCount() : await coleccion().countDocuments(filtro);
       const tope = formato === "pdf" ? limites.maxPdf : limites.maxXlsx;
@@ -189,7 +199,7 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
         }
         yield* vaciar();
       }
-      const lineas = [`Generado: ${hoy()}`, `Filas: ${total.toLocaleString("es-PE")}`, `Filtros: ${describirFiltros(req.query)}`];
+      const lineas = [`Generado: ${hoy()}`, `Filas: ${total.toLocaleString("es-PE")}`, `Filtros: ${describirFiltros(consulta)}`];
       res.set({
         "Content-Type": formato === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="stock-${hoy()}.${formato}"`,
@@ -203,7 +213,7 @@ export function createRouter({ core, db, env = process.env, avisar = console.war
         await escribirXlsx({
           salida: res, columnas: cols, filas: filas(), conFormato,
           resumen: [
-            "Generado\t" + hoy(), "Filas\t" + total, "Filtros\t" + describirFiltros(req.query),
+            "Generado\t" + hoy(), "Filas\t" + total, "Filtros\t" + describirFiltros(consulta),
             "Formato condicional\t" + (conFormato ? "Incluido: stock agotado en rojo claro y pedido sugerido en amarillo (más intenso = mayor efectividad)" : `No incluido: hay más de ${limites.formatoXlsx.toLocaleString("es-PE")} filas`),
           ],
         });

@@ -31,7 +31,11 @@ th[data-col=detalle], th[data-col=motivo], th[data-col=recomendacion], th[data-c
 td[data-col=detalle] { min-width:170px; max-width:300px; }
 td[data-col=motivo], td[data-col=recomendacion], td[data-col=equivalente_stock], td[data-col=codigos_equivalentes] { min-width:220px; max-width:420px; line-height:1.35; }
 #paginacion { display:flex; gap:12px; align-items:center; justify-content:center; margin:14px 0; }
-@media (max-width:600px) { #filtros { grid-template-columns:1fr 1fr; } }
+label.check { flex-direction:row; align-items:center; gap:6px; padding-bottom:9px; }
+/* Teléfono: dos columnas que sí se pueden encoger (los inputs de fecha y los select traen un ancho mínimo propio que ensanchaba la página). */
+label, input, select { min-width:0; }
+input, select { width:100%; }
+input[type=checkbox] { width:auto; }
 
 .oculto { position:absolute; left:-9999px; }
 th.spark, td.spark { position:sticky; right:0; background:var(--panel); border-left:1px solid var(--borde); width:150px; min-width:150px; text-align:center; }
@@ -85,3 +89,18 @@ td.pide.alto { color:#1d1d1b; }
 
 .barra { display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; justify-content:flex-end; }
 .exportar { display:flex; gap:8px; }
+
+@media (max-width:600px) {
+  header, main { padding:12px; }
+  header { flex-direction:column; align-items:stretch; }
+  #filtros { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  #filtros label.check, #filtros .acciones { grid-column:1 / -1; }
+  input[type=date] { min-height:34px; }
+  .barra { flex-wrap:wrap; justify-content:flex-start; }
+  .columnas { position:static; }
+  #panel-col { left:12px; right:12px; width:auto; max-height:70vh; overflow:auto; }
+  /* la columna de gráficos deja de quedar fija: en una pantalla angosta tapaba el detalle */
+  th.spark, td.spark { position:static; width:120px; min-width:120px; }
+  td.spark svg { width:104px; }
+  #leyenda { flex-wrap:wrap; }
+}

@@ -40,6 +40,7 @@ export function paginaStock({ base, login }) {
 <form id="filtros" autocomplete="off">
   <label>Código<input type="search" name="codigo" maxlength="60" placeholder="ZM…"></label>
   <label>Detalle<input type="search" name="detalle" maxlength="120" placeholder="palabras del detalle"></label>
+  <label class="check"><input type="checkbox" name="ultima" value="1"> Solo la última fecha</label>
   <label>Desde<input type="date" name="desde"></label>
   <label>Hasta<input type="date" name="hasta"></label>
   ${selects}

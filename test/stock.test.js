@@ -273,6 +273,29 @@ test("la API devuelve nombres largos aunque Mongo guarde claves cortas", async (
   }
 });
 
+test("«Solo la última fecha»: desde = hasta = la fecha más reciente (pisa el rango) y solo si se marca", async () => {
+  const col = coleccionFalsa();
+  const reciente = new Date("2026-10-30T00:00:00Z");
+  const buscar = col.find;
+  col.find = (filtro, opc) => (Object.keys(filtro).length === 0 && opc.projection.f === 1 && !opc.projection.c
+    ? (col.llamadas.push(["ultima"]), { sort: () => ({ limit: () => ({ toArray: async () => [{ f: reciente }] }) }) })
+    : buscar(filtro, opc));
+  const core = { autenticar: () => (q, r, n) => ((q.auth = { empresaId: "e1" }), n()), requierePermiso: () => (q, r, n) => n() };
+  const app = express();
+  app.use("/stock", createRouter({ core, db: { collection: () => col }, env: { STOCK_EMPRESA_ID: "e1" }, avisar: () => {} }));
+  const s = app.listen(0);
+  try {
+    const b = `http://127.0.0.1:${s.address().port}/stock/api`;
+    assert.equal((await fetch(`${b}/datos?ultima=1&desde=2020-01-01`)).status, 200);
+    const f = col.llamadas.find((l) => l[0] === "find" && l[1].f)[1].f;
+    assert.equal(f.$gte.toISOString(), reciente.toISOString());
+    assert.equal(f.$lte.toISOString(), reciente.toISOString());
+    assert.equal(col.llamadas.filter((l) => l[0] === "ultima").length, 1);
+    await fetch(`${b}/datos`);
+    assert.equal(col.llamadas.filter((l) => l[0] === "ultima").length, 1); // sin la casilla no se consulta
+  } finally { s.close(); }
+});
+
 describe("exportación", () => {
   const fila = (o) => ({ c: "UF-1", d: "Arrancador", f: new Date("2026-10-30T00:00:00Z"), m: "BOSCH", t: 50, pc: 0, pp: 0, ef: 0.5, ur: false, mt: "Error esperado 28%", ...o });
   const DOCS = [fila({ c: "UF-1", t: 0, pc: 40, pp: 60, ef: 0.9 }), fila({ c: "UF-2", t: 30, pc: 9, pp: 12, ef: 0.2, ur: true }), fila({ c: "UF-3", t: 80, pc: 0, pp: 0, ef: null })];
